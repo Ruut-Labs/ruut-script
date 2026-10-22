@@ -46,7 +46,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "v${{ inputs.version }}" -p latest.json -D cur --clobber
+          gh release download "v${{ inputs.version }}" -R "${{ github.repository }}" -p latest.json -D cur --clobber
           python3 - <<'PY'
           import json, glob
           L = json.load(open("cur/latest.json"))
@@ -55,4 +55,4 @@ jobs:
           json.dump(L, open("cur/latest.json", "w"), ensure_ascii=False, indent=1)
           print(sorted(L["components"]))
           PY
-          gh release upload "v${{ inputs.version }}" cur/latest.json --clobber
+          gh release upload "v${{ inputs.version }}" -R "${{ github.repository }}" cur/latest.json --clobber
