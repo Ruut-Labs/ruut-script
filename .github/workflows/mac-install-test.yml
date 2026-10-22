@@ -76,6 +76,15 @@ jobs:
           echo "видалений файл прибрано"
           ./zxp -verify "$CEP" | tee verify2.log; grep -q "verified successfully" verify2.log
           test ! -f "$CEP/config.json"
+      - name: Аватар у Твіттер-рамці — детектор облич (tw_face --image)
+        run: |
+          ROOT="$HOME/Library/Application Support/Ruut Script"
+          cd "$ROOT"
+          test -f models/face_detection_yunet.onnx
+          ./python/bin/python3 -c "from PIL import Image; Image.new('RGB', (400, 600), (120, 140, 160)).save('av.jpg')"
+          ./python/bin/python3 -X utf8 tw_face.py --image av.jpg --out av.json
+          cat av.json; grep -q '"ok": true' av.json
+          if grep -q '"why"' av.json; then echo "детектор не запустився"; exit 1; fi
       - name: Субтитри на французькому тесті (наскрізно)
         run: |
           ROOT="$HOME/Library/Application Support/Ruut Script"
