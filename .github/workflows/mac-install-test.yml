@@ -12,11 +12,18 @@ jobs:
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Установка одним рядком (як у колег)
+      - name: Установка одним рядком (як у колег) — БЕЗ системного Python
         env:
           RUUT_KEY: ${{ secrets.RUUT_KEY }}
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tools/release/install.sh)"
+          # як у дизайнера без Command Line Tools: python3 «немає» — скрипт не має на нього покладатись
+          mkdir -p "$HOME/nopy"
+          echo '#!/bin/sh' > "$HOME/nopy/python3"
+          echo 'echo "python3 unavailable" >&2; exit 127' >> "$HOME/nopy/python3"
+          chmod +x "$HOME/nopy/python3"
+          curl -fsSL -o install.sh https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tools/release/install.sh
+          if grep -n 'usr/bin/python3' install.sh | grep -v '#'; then echo "install.sh calls system python"; exit 1; fi
+          PATH="$HOME/nopy:$PATH" bash install.sh
       - name: Що встановилось
         run: |
           ROOT="$HOME/Library/Application Support/Ruut Script"
@@ -24,6 +31,9 @@ jobs:
           ls -la "$ROOT" | head -40
           cat "$ROOT/manifest.json"
           ls "$CEP"; test -f "$CEP/CSXS/manifest.xml"; test -f "$CEP/META-INF/signatures.xml"
+          # підпис панелі цілий (AE не покаже панель зі зламаним підписом)
+          curl -fsSL -o zxp https://github.com/Adobe-CEP/CEP-Resources/raw/master/ZXPSignCMD/4.1.3/macOS/ZXPSignCmd && chmod +x zxp
+          ./zxp -verify "$CEP" | tee verify.log; grep -q "verified successfully" verify.log
           sed 's/"key": "[^"]*"/"key": "***"/' "$ROOT/config.json"
           test ! -f "$CEP/config.json"
       - name: Повторний запуск = оновлення (має нічого не качати)

@@ -43,7 +43,14 @@ MAJOR="${OSV%%.*}"
 [ "$MAJOR" -ge 13 ] || die "потрібна macOS 13 або новіша (у тебе $OSV). After Effects 2025 теж вимагає 13+."
 AE=""
 for d in /Applications/Adobe\ After\ Effects\ 20*; do [ -d "$d" ] && AE="$d"; done
-say "Mac · $PLAT · macOS $OSV · ${AE:+$(basename "$AE")}${AE:-After Effects не знайдено (панель усе одно поставлю)}"
+if [ -n "$AE" ]; then say "Mac · $PLAT · macOS $OSV · $(basename "$AE")"
+else say "Mac · $PLAT · macOS $OSV · After Effects не знайдено (панель усе одно поставлю — вона з'явиться, щойно AE буде встановлений)"; fi
+if [ -n "$AE" ]; then
+  AEY="$(basename "$AE" | grep -oE '20[0-9]{2}' | head -1)"
+  if [ -n "$AEY" ] && [ "$AEY" -lt 2024 ]; then
+    say "  · знайдено After Effects $AEY — нова панель працює з AE 2024 і новіших; ставлю все, панель з'явиться після оновлення AE"
+  fi
+fi
 
 FREE_KB="$(df -k "$HOME" | awk 'NR==2{print $4}')"
 [ "${FREE_KB:-0}" -ge 3800000 ] || die "мало місця на диску: вільно $((FREE_KB/1024)) МБ, потрібно близько 3.5 ГБ"
@@ -62,25 +69,41 @@ mkdir -p "$ROOT/staging" "$ROOT/logs"
 step "читаю останній реліз"
 dl "https://github.com/$REPO/releases/latest/download/latest.json" "$ROOT/staging/latest.json" 2>/dev/null \
   || die "не можу прочитати реліз — перевір інтернет"
-read -r VERSION <<<"$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$ROOT/staging/latest.json" 2>/dev/null \
-  || sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/staging/latest.json" | head -1)"
+# JSON читаємо через JavaScript, вбудований у macOS (osascript -l JavaScript).
+# НЕ через /usr/bin/python3: на маку без Command Line Tools це заглушка, яка
+# відкриває вікно «встановити інструменти розробника» — і установка стоїть.
+js_json() { # $1 — режим, далі аргументи
+  /usr/bin/osascript -l JavaScript - "$@" <<'JXA'
+ObjC.import('Foundation');
+function read(p) {
+  var s = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null);
+  return s ? JSON.parse(ObjC.unwrap(s).replace(/^﻿/, '')) : null;
+}
+function run(argv) {
+  var mode = argv[0];
+  if (mode === 'version') { var L = read(argv[1]); return L ? L.version : ''; }
+  if (mode === 'comps') {
+    var L = read(argv[1]), plat = argv[2], out = [];
+    (L.platforms[plat] || []).forEach(function (name) {
+      var c = L.components[name];
+      if (c) { out.push([name, c.asset, c.sha256, c.size, c.target || '-', c.enc ? '1' : '0', c.tag || ('v' + L.version)].join(' ')); }
+    });
+    return out.join('\n');
+  }
+  if (mode === 'have') { var M = read(argv[1]); return (M && M.components && M.components[argv[2]]) || ''; }
+  return '';
+}
+JXA
+}
+VERSION="$(js_json version "$ROOT/staging/latest.json" 2>/dev/null)"
 [ -n "$VERSION" ] || die "не розібрав latest.json"
 ok "реліз v$VERSION"
 
-# компоненти цієї платформи: name asset sha256 size target enc
-COMPS="$(/usr/bin/python3 - "$ROOT/staging/latest.json" "$PLAT" <<'PY'
-import json,sys
-L=json.load(open(sys.argv[1])); plat=sys.argv[2]
-for name in L["platforms"][plat]:
-    c=L["components"].get(name)
-    if c: print(name, c["asset"], c["sha256"], c["size"], c["target"] or "-", "1" if c.get("enc") else "0", c.get("tag") or "v" + L["version"])
-PY
-)" || die "не розібрав список компонентів (потрібен /usr/bin/python3 — він є в macOS; якщо ні: xcode-select --install)"
+# компоненти цієї платформи: name asset sha256 size target enc tag
+COMPS="$(js_json comps "$ROOT/staging/latest.json" "$PLAT" 2>/dev/null)" || die "не розібрав список компонентів"
 [ -n "$COMPS" ] || die "у релізі немає компонентів для $PLAT"
 
-have_sha() { /usr/bin/python3 -c 'import json,sys,os
-p=sys.argv[1]
-print(json.load(open(p)).get("components",{}).get(sys.argv[2],"") if os.path.exists(p) else "")' "$ROOT/manifest.json" "$1" 2>/dev/null || true; }
+have_sha() { [ -f "$ROOT/manifest.json" ] && js_json have "$ROOT/manifest.json" "$1" 2>/dev/null || true; }
 
 MAN_TMP="$ROOT/staging/manifest.new.json"
 printf '{"version":"%s","platform":"%s","components":{' "$VERSION" "$PLAT" > "$MAN_TMP"
@@ -131,6 +154,14 @@ if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" 
   if cp "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/" 2>/dev/null; then ok "шрифт Minor-Bold"
   else say "  · шрифт не поставився сам — двічі клацни «Minor-Bold.ttf» у папці Ruut Script і натисни «Встановити»"; fi
 fi
+# стара ScriptUI-панель у самому AE: прибираємо, якщо є права; ні — підказуємо
+for d in /Applications/Adobe\ After\ Effects\ 20*; do
+  OLDP="$d/Scripts/ScriptUI Panels/Ruut Script 2.0.jsx"
+  if [ -f "$OLDP" ]; then
+    if mv "$OLDP" "$OLDP.before-3.0.bak" 2>/dev/null; then ok "стару панель «Ruut Script 2.0» прибрано з $(basename "$d")"
+    else say "  · у меню Window лишилась стара «Ruut Script 2.0» ($(basename "$d")) — не заважає; нова панель: Window → Extensions → Ruut Script"; fi
+  fi
+done
 OLD="$HOME/Library/Application Support/Ruut Script/panel/Ruut Script 2.0.jsx"
 if [ -f "$OLD" ]; then mv "$OLD" "$OLD.before-3.0.bak" 2>/dev/null && printf '(function(){ alert("Панель переїхала: Window → Extensions → Ruut Script"); })();' > "$OLD" || true; fi
 ok "готово до перевірки"
