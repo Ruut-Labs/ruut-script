@@ -5,8 +5,9 @@
 #
 #   bash build_mac_component.sh <version> <arch: arm64|x64> <outdir>
 set -euo pipefail
-VERSION="$1"; ARCH="$2"; OUT="$3"
-mkdir -p "$OUT"
+VERSION="$1"; ARCH="$2"
+mkdir -p "$3"
+OUT="$(cd "$3" && pwd)"            # абсолютний: нижче є cd у підпапки
 WORK="$(mktemp -d)"
 PBS_TAG="${PBS_TAG:-20251014}"          # реліз python-build-standalone
 PY_VER="${PY_VER:-3.12.12}"
