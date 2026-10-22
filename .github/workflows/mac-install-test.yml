@@ -72,7 +72,8 @@ jobs:
           });
           JS
           node upd.js "$CEP"
-          test ! -e "$ROOT/Library/_old_item/clip.txt" && echo "видалений файл прибрано"
+          if [ -e "$ROOT/Library/_old_item/clip.txt" ]; then echo "видалений з релізу файл ЛИШИВСЯ"; exit 1; fi
+          echo "видалений файл прибрано"
           ./zxp -verify "$CEP" | tee verify2.log; grep -q "verified successfully" verify2.log
           test ! -f "$CEP/config.json"
       - name: Субтитри на французькому тесті (наскрізно)
