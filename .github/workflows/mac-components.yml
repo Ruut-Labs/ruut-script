@@ -1,0 +1,57 @@
+# GitHub Actions (у репо Ruut-Labs/ruut-script): mac-компоненти для релізу.
+# Запуск: вручну (workflow_dispatch) з версією = тег релізу без «v».
+# Два раннери (Apple Silicon + Intel) збирають python/ffmpeg, третій крок
+# додає їх у latest.json того ж релізу й перезаливає його.
+name: mac-components
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версія релізу (напр. 3.0.0; тег v3.0.0 уже має існувати)"
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Збірка python + ffmpeg (${{ matrix.arch }})
+        run: bash tools/release/build_mac_component.sh "${{ inputs.version }}" "${{ matrix.arch }}" out
+      - name: У реліз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v${{ inputs.version }}" out/*.zip --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sha-${{ matrix.arch }}
+          path: out/*.sha256.json
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: sha
+      - name: Додати mac-компоненти в latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "v${{ inputs.version }}" -p latest.json -D cur --clobber
+          python3 - <<'PY'
+          import json, glob
+          L = json.load(open("cur/latest.json"))
+          for f in glob.glob("sha/**/*.sha256.json", recursive=True):
+              c = json.load(open(f)); name = c.pop("name"); L["components"][name] = c
+          json.dump(L, open("cur/latest.json", "w"), ensure_ascii=False, indent=1)
+          print(sorted(L["components"]))
+          PY
+          gh release upload "v${{ inputs.version }}" cur/latest.json --clobber
