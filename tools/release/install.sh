@@ -73,7 +73,7 @@ import json,sys
 L=json.load(open(sys.argv[1])); plat=sys.argv[2]
 for name in L["platforms"][plat]:
     c=L["components"].get(name)
-    if c: print(name, c["asset"], c["sha256"], c["size"], c["target"] or "-", "1" if c.get("enc") else "0")
+    if c: print(name, c["asset"], c["sha256"], c["size"], c["target"] or "-", "1" if c.get("enc") else "0", c.get("tag") or "v" + L["version"])
 PY
 )" || die "не розібрав список компонентів (потрібен /usr/bin/python3 — він є в macOS; якщо ні: xcode-select --install)"
 [ -n "$COMPS" ] || die "у релізі немає компонентів для $PLAT"
@@ -85,12 +85,12 @@ print(json.load(open(p)).get("components",{}).get(sys.argv[2],"") if os.path.exi
 MAN_TMP="$ROOT/staging/manifest.new.json"
 printf '{"version":"%s","platform":"%s","components":{' "$VERSION" "$PLAT" > "$MAN_TMP"
 first=1
-while read -r NAME ASSET SHA SIZE TARGET ENC; do
+while read -r NAME ASSET SHA SIZE TARGET ENC TAG; do
   [ "$TARGET" = "-" ] && TARGET=""
   if [ "$(have_sha "$NAME")" = "$SHA" ]; then ok "$NAME — уже стоїть"; else
     step "$NAME · $(( SIZE / 1048576 )) МБ"
     F="$ROOT/staging/$ASSET"
-    dl "https://github.com/$REPO/releases/download/v$VERSION/$ASSET" "$F" || die "$NAME: не скачалось"
+    dl "https://github.com/$REPO/releases/download/$TAG/$ASSET" "$F" || die "$NAME: не скачалось"
     GOT="$(shasum -a 256 "$F" | cut -d' ' -f1)"
     [ "$GOT" = "$SHA" ] || { rm -f "$F"; die "$NAME: файл пошкоджено при завантаженні"; }
     ZIP="$F"
