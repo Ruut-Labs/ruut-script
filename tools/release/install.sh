@@ -128,8 +128,16 @@ while read -r NAME ASSET SHA SIZE TARGET ENC TAG; do
     if [ "$NAME" = "cep" ]; then DEST="$CEP"; rm -rf "$CEP"; else DEST="$ROOT/${TARGET}"; fi
     # архів міг прийти з зайвою верхньою папкою (python/python/…) — знімаємо її
     if [ -n "$TARGET" ] && [ -d "$UNP/$TARGET" ] && [ "$(ls -A "$UNP" | wc -l | tr -d ' ')" = "1" ]; then UNP="$UNP/$TARGET"; fi
+    # склад нової версії компонента (шляхи від кореня установки; cep — від папки панелі)
+    PRE=""; [ "$NAME" != "cep" ] && [ -n "$TARGET" ] && PRE="$TARGET/"
+    ( cd "$UNP" && find . -type f | sed "s|^\./|$PRE|" | sort ) > "$ROOT/staging/$NAME.new"
     mkdir -p "$DEST"
     ditto "$UNP" "$DEST"
+    # прибрати те, що було в старій версії компонента, а в новій уже немає
+    if [ "$NAME" != "cep" ] && [ -f "$ROOT/.files/$NAME.txt" ]; then
+      sort "$ROOT/.files/$NAME.txt" | comm -23 - "$ROOT/staging/$NAME.new" | while IFS= read -r OLDF; do rm -f "$ROOT/$OLDF"; done
+    fi
+    mkdir -p "$ROOT/.files"; mv "$ROOT/staging/$NAME.new" "$ROOT/.files/$NAME.txt"
     rm -rf "$ROOT/staging/$NAME" "$ZIP" "$F"
     ok "$NAME"
   fi
@@ -149,7 +157,7 @@ printf '{"panelJsx": "%s/Ruut Script 2.0.jsx", "toolsDir": "%s", "root": "%s", "
 rm -f "$CEP/config.json"
 # шрифт: папки ~/Library/Fonts на «чистому» маку може не бути; помилка тут
 # не має зривати установку — без шрифту працює все, крім його вигляду
-if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" ]; then
+if [ -f "$ROOT/Minor-Bold.ttf" ] && ! cmp -s "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/Minor-Bold.ttf" 2>/dev/null; then
   mkdir -p "$HOME/Library/Fonts" 2>/dev/null || true
   if cp "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/" 2>/dev/null; then ok "шрифт Minor-Bold"
   else say "  · шрифт не поставився сам — двічі клацни «Minor-Bold.ttf» у папці Ruut Script і натисни «Встановити»"; fi
@@ -170,6 +178,9 @@ if [ ! -x "$ROOT/python/bin/python3" ] && [ -x "$ROOT/python/python/bin/python3"
   mv "$ROOT/python" "$ROOT/python.nested" && mv "$ROOT/python.nested/python" "$ROOT/python" && rm -rf "$ROOT/python.nested"
 fi
 [ -x "$ROOT/python/bin/python3" ] || die "Python не розпакувався (немає python/bin/python3)"
+
+# разова міграція з релізу (якщо є) — та сама, що виконує кнопка «Оновити» в панелі
+if [ -f "$ROOT/post_update.py" ]; then ( cd "$ROOT" && PYTHONIOENCODING=utf-8 "$ROOT/python/bin/python3" -X utf8 post_update.py ) || true; fi
 
 step "самоперевірка на тестовому звуці"
 if ( cd "$ROOT" && PYTHONIOENCODING=utf-8 "$ROOT/python/bin/python3" -X utf8 selftest.py ) > "$ROOT/logs/install-selftest.log" 2>&1; then

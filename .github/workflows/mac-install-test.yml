@@ -42,6 +42,39 @@ jobs:
         run: |
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tools/release/install.sh)" | tee second.log
           if grep -q "МБ" second.log; then echo "повторний запуск щось качав"; exit 1; fi
+      - name: Кнопка «Оновити» — той самий код, що в панелі (Node)
+        run: |
+          ROOT="$HOME/Library/Application Support/Ruut Script"
+          CEP="$HOME/Library/Application Support/Adobe/CEP/extensions/com.ruut.panel"
+          # «стара версія»: панель і бібліотека позначені застарілими, а в бібліотеці
+          # лежить файл, якого в новій версії немає — оновлення має його прибрати
+          mkdir -p "$ROOT/Library/_old_item"; echo old > "$ROOT/Library/_old_item/clip.txt"
+          echo "Library/_old_item/clip.txt" >> "$ROOT/.files/library.txt"
+          cat > patch.js <<'JS'
+          const fs = require('fs'), p = process.argv[2] + '/manifest.json';
+          const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+          for (const n of ['panel', 'cep', 'library']) m.components[n] = '0'.repeat(64);
+          fs.writeFileSync(p, JSON.stringify(m, null, 1));
+          JS
+          node patch.js "$ROOT"
+          cat > upd.js <<'JS'
+          global.window = {};
+          require(process.argv[2] + '/js/updater.js');
+          const U = window.RuutUpdater;
+          U.check(process.argv[2], (err, p) => {
+            if (err) { console.log('CHECK FAIL', err.message); process.exit(1); }
+            console.log('качати:', p.changed.map(c => c.name).join(', '));
+            U.apply(process.argv[2], p, ev => { if (ev.text) console.log('  ·', ev.text); }, (e, r) => {
+              if (e) { console.log('APPLY FAIL', e.message); process.exit(1); }
+              console.log('оновлено:', r.done.map(c => c.name).join(', '), '| самоперевірка', r.selftest.code);
+              process.exit(r.selftest.code === 0 ? 0 : 1);
+            });
+          });
+          JS
+          node upd.js "$CEP"
+          test ! -e "$ROOT/Library/_old_item/clip.txt" && echo "видалений файл прибрано"
+          ./zxp -verify "$CEP" | tee verify2.log; grep -q "verified successfully" verify2.log
+          test ! -f "$CEP/config.json"
       - name: Субтитри на французькому тесті (наскрізно)
         run: |
           ROOT="$HOME/Library/Application Support/Ruut Script"
