@@ -16,7 +16,7 @@ jobs:
         env:
           RUUT_KEY: ${{ secrets.RUUT_KEY }}
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/tools/release/install.sh)"
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tools/release/install.sh)"
       - name: Що встановилось
         run: |
           ROOT="$HOME/Library/Application Support/Ruut Script"
@@ -29,7 +29,7 @@ jobs:
         env:
           RUUT_KEY: ${{ secrets.RUUT_KEY }}
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/tools/release/install.sh)" | tee second.log
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tools/release/install.sh)" | tee second.log
           if grep -q "МБ" second.log; then echo "повторний запуск щось качав"; exit 1; fi
       - name: Субтитри на французькому тесті (наскрізно)
         run: |
