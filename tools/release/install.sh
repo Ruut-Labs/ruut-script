@@ -103,9 +103,11 @@ while read -r NAME ASSET SHA SIZE TARGET ENC; do
     UNP="$ROOT/staging/$NAME"; rm -rf "$UNP"; mkdir -p "$UNP"
     ditto -x -k "$ZIP" "$UNP" || die "$NAME: не розпакувалось"
     if [ "$NAME" = "cep" ]; then DEST="$CEP"; else DEST="$ROOT/${TARGET}"; fi
+    # архів міг прийти з зайвою верхньою папкою (python/python/…) — знімаємо її
+    if [ -n "$TARGET" ] && [ -d "$UNP/$TARGET" ] && [ "$(ls -A "$UNP" | wc -l | tr -d ' ')" = "1" ]; then UNP="$UNP/$TARGET"; fi
     mkdir -p "$DEST"
     ditto "$UNP" "$DEST"
-    rm -rf "$UNP" "$ZIP" "$F"
+    rm -rf "$ROOT/staging/$NAME" "$ZIP" "$F"
     ok "$NAME"
   fi
   [ $first -eq 1 ] || printf ',' >> "$MAN_TMP"; first=0
@@ -124,6 +126,11 @@ if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" 
 OLD="$HOME/Library/Application Support/Ruut Script/panel/Ruut Script 2.0.jsx"
 if [ -f "$OLD" ]; then mv "$OLD" "$OLD.before-3.0.bak"; printf '(function(){ alert("Панель переїхала: Window → Extensions → Ruut Script"); })();' > "$OLD"; fi
 ok "готово до перевірки"
+
+if [ ! -x "$ROOT/python/bin/python3" ] && [ -x "$ROOT/python/python/bin/python3" ]; then
+  mv "$ROOT/python" "$ROOT/python.nested" && mv "$ROOT/python.nested/python" "$ROOT/python" && rm -rf "$ROOT/python.nested"
+fi
+[ -x "$ROOT/python/bin/python3" ] || die "Python не розпакувався (немає python/bin/python3)"
 
 step "самоперевірка на тестовому звуці"
 if ( cd "$ROOT" && PYTHONIOENCODING=utf-8 "$ROOT/python/bin/python3" -X utf8 selftest.py ) > "$ROOT/logs/install-selftest.log" 2>&1; then

@@ -34,7 +34,9 @@ rm -rf "$WORK/python-root/python/lib/python3.12/site-packages/numpy/tests" 2>/de
 import onnxruntime, ctranslate2, numpy, PIL, faster_whisper, onnx_asr, av
 print("ort", onnxruntime.__version__, "ct2", ctranslate2.__version__, "np", numpy.__version__)
 PY
-( cd "$WORK/python-root" && ditto -c -k --sequesterRsrc --keepParent python "$OUT/python-mac-$ARCH-$VERSION.zip" )
+# БЕЗ --keepParent: у zip — вміст python/ (bin, lib…), бо компонент і так
+# розпаковується в <root>/python. З --keepParent виходило python/python/bin.
+( cd "$WORK/python-root/python" && ditto -c -k --sequesterRsrc . "$OUT/python-mac-$ARCH-$VERSION.zip" )
 
 echo "== ffmpeg ($ARCH)"
 "$PY" -m pip download --no-deps -d "$WORK/ff" --only-binary=:all: \
