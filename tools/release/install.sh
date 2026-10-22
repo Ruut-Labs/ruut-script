@@ -122,9 +122,15 @@ xattr -dr com.apple.quarantine "$ROOT" "$CEP" 2>/dev/null || true
 ESC_ROOT="$(printf '%s' "$ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 printf '{"panelJsx": "%s/Ruut Script 2.0.jsx", "toolsDir": "%s", "root": "%s", "repo": "%s", "key": "%s", "version": "%s"}\n' \
   "$ESC_ROOT" "$ESC_ROOT" "$ESC_ROOT" "$REPO" "$KEY" "$VERSION" > "$CEP/config.json"
-if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" ]; then cp "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/"; ok "шрифт Minor-Bold"; fi
+# шрифт: папки ~/Library/Fonts на «чистому» маку може не бути; помилка тут
+# не має зривати установку — без шрифту працює все, крім його вигляду
+if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" ]; then
+  mkdir -p "$HOME/Library/Fonts" 2>/dev/null || true
+  if cp "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/" 2>/dev/null; then ok "шрифт Minor-Bold"
+  else say "  · шрифт не поставився сам — двічі клацни «Minor-Bold.ttf» у папці Ruut Script і натисни «Встановити»"; fi
+fi
 OLD="$HOME/Library/Application Support/Ruut Script/panel/Ruut Script 2.0.jsx"
-if [ -f "$OLD" ]; then mv "$OLD" "$OLD.before-3.0.bak"; printf '(function(){ alert("Панель переїхала: Window → Extensions → Ruut Script"); })();' > "$OLD"; fi
+if [ -f "$OLD" ]; then mv "$OLD" "$OLD.before-3.0.bak" 2>/dev/null && printf '(function(){ alert("Панель переїхала: Window → Extensions → Ruut Script"); })();' > "$OLD" || true; fi
 ok "готово до перевірки"
 
 if [ ! -x "$ROOT/python/bin/python3" ] && [ -x "$ROOT/python/python/bin/python3" ]; then
