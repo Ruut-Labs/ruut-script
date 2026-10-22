@@ -1,33 +1,36 @@
 #!/bin/bash
-# Ruut Script — установка на macOS одним рядком (без Gatekeeper: усе приходить
-# через curl, без quarantine). Потребує RUUT_TOKEN (ключ лише на читання
-# приватного репо з релізами) — його вшиває сторінка установки в сам рядок.
+# Ruut Script — установка на macOS одним рядком. Без Gatekeeper: усе приходить
+# через curl, без позначки quarantine. Без токенів: релізи публічні, а наші
+# компоненти (логіка, панель, Library зі шрифтом) зашифровані — ключ RUUT_KEY
+# іде в самому рядку установки, який роздається приватно:
 #
-#   RUUT_TOKEN=github_pat_… bash -c "$(curl -fsSL -H "Authorization: Bearer $RUUT_TOKEN" \
-#       -H "Accept: application/vnd.github.raw" \
-#       https://api.github.com/repos/Ruut-Labs/ruut-script/contents/tools/release/install.sh)"
+#   RUUT_KEY=<ключ> bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ruut-Labs/ruut-script/main/tools/release/install.sh)"
 #
 # Куди: ~/Library/Application Support/Ruut Script (плоско: логіка, .py, ffmpeg,
 # python/, models/, Library/) + панель у ~/Library/Application Support/Adobe/CEP/extensions.
+# Повторний запуск = оновлення: качає лише те, що змінилось.
 set -euo pipefail
 
 REPO="${RUUT_REPO:-Ruut-Labs/ruut-script}"
-TOKEN="${RUUT_TOKEN:-}"
+KEY="${RUUT_KEY:-}"
 ROOT="$HOME/Library/Application Support/Ruut Script"
 CEP="$HOME/Library/Application Support/Adobe/CEP/extensions/com.ruut.panel"
-API="https://api.github.com"
 UA="RuutScript-Installer"
 
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 step() { printf '  \033[33m◐\033[0m %s\n' "$*"; }
-die()  { printf '  \033[31m✕\033[0m %s\n' "$*" >&2; exit 1; }
+die()  {
+  printf '\n  \033[31m✕ %s\033[0m\n' "$*" >&2
+  printf '  Нічого не зламано: запусти той самий рядок ще раз — докачає з місця обриву.\n  Не допомогло — скопіюй увесь текст у цьому вікні й надішли Мирону.\n' >&2
+  exit 1
+}
 
 say ""
 say "Ruut Script — установка"
-[ -n "$TOKEN" ] || die "немає ключа (RUUT_TOKEN). Скопіюй рядок установки зі сторінки ще раз — ключ усередині."
+[ -n "$KEY" ] || die "у рядку установки немає ключа. Скопіюй рядок ще раз повністю — він починається з RUUT_KEY="
 command -v curl >/dev/null || die "немає curl"
-command -v python3 >/dev/null 2>&1 || true
+command -v openssl >/dev/null || die "немає openssl"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -37,60 +40,72 @@ case "$ARCH" in
 esac
 OSV="$(sw_vers -productVersion)"
 MAJOR="${OSV%%.*}"
-[ "$MAJOR" -ge 13 ] || die "потрібна macOS 13 або новіша (у тебе $OSV)"
+[ "$MAJOR" -ge 13 ] || die "потрібна macOS 13 або новіша (у тебе $OSV). After Effects 2025 теж вимагає 13+."
 AE=""
 for d in /Applications/Adobe\ After\ Effects\ 20*; do [ -d "$d" ] && AE="$d"; done
 say "Mac · $PLAT · macOS $OSV · ${AE:+$(basename "$AE")}${AE:-After Effects не знайдено (панель усе одно поставлю)}"
+
+FREE_KB="$(df -k "$HOME" | awk 'NR==2{print $4}')"
+[ "${FREE_KB:-0}" -ge 3800000 ] || die "мало місця на диску: вільно $((FREE_KB/1024)) МБ, потрібно близько 3.5 ГБ"
+
 if pgrep -x "After Effects" >/dev/null 2>&1; then
   say "  After Effects відкритий — закрий його і натисни Enter (або Ctrl+C, щоб перервати)"
   read -r _ </dev/tty || true
+  while pgrep -x "After Effects" >/dev/null 2>&1; do say "  ще відкритий… закрий і натисни Enter"; read -r _ </dev/tty || true; done
 fi
 
-gh_api() { curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: $UA" -H "X-GitHub-Api-Version: 2022-11-28" "$@"; }
-gh_asset() { # $1 asset api url, $2 dest ; докачує з місця обриву
-  curl -fL --retry 3 --retry-delay 2 -C - -H "Authorization: Bearer $TOKEN" -H "Accept: application/octet-stream" -H "User-Agent: $UA" --progress-bar -o "$2" "$1"
+dl() { # $1 url, $2 dest — з повторами і докачкою
+  curl -fL --retry 5 --retry-delay 3 --retry-all-errors -C - -A "$UA" --progress-bar -o "$2" "$1"
 }
 
-step "читаю останній реліз"
-REL_JSON="$(gh_api "$API/repos/$REPO/releases/latest")" || die "не можу прочитати реліз (ключ правильний? інтернет є?)"
-TAG="$(printf '%s' "$REL_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["tag_name"])')"
-LATEST_URL="$(printf '%s' "$REL_JSON" | python3 -c 'import sys,json;a=[x for x in json.load(sys.stdin)["assets"] if x["name"]=="latest.json"];print(a[0]["url"] if a else "")')"
-[ -n "$LATEST_URL" ] || die "у релізі $TAG немає latest.json"
 mkdir -p "$ROOT/staging" "$ROOT/logs"
-gh_asset "$LATEST_URL" "$ROOT/staging/latest.json" >/dev/null 2>&1
-ok "реліз $TAG"
+step "читаю останній реліз"
+dl "https://github.com/$REPO/releases/latest/download/latest.json" "$ROOT/staging/latest.json" 2>/dev/null \
+  || die "не можу прочитати реліз — перевір інтернет"
+read -r VERSION <<<"$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$ROOT/staging/latest.json" 2>/dev/null \
+  || sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/staging/latest.json" | head -1)"
+[ -n "$VERSION" ] || die "не розібрав latest.json"
+ok "реліз v$VERSION"
 
-# компоненти цієї платформи
-COMPS="$(python3 - "$ROOT/staging/latest.json" "$PLAT" <<'PY'
+# компоненти цієї платформи: name asset sha256 size target enc
+COMPS="$(/usr/bin/python3 - "$ROOT/staging/latest.json" "$PLAT" <<'PY'
 import json,sys
 L=json.load(open(sys.argv[1])); plat=sys.argv[2]
 for name in L["platforms"][plat]:
     c=L["components"].get(name)
-    if c: print(name, c["asset"], c["sha256"], c["size"], c["target"])
+    if c: print(name, c["asset"], c["sha256"], c["size"], c["target"] or "-", "1" if c.get("enc") else "0")
 PY
-)"
-[ -n "$COMPS" ] || die "у latest.json немає компонентів для $PLAT (збірка для мака ще не викладена)"
+)" || die "не розібрав список компонентів (потрібен /usr/bin/python3 — він є в macOS; якщо ні: xcode-select --install)"
+[ -n "$COMPS" ] || die "у релізі немає компонентів для $PLAT"
 
-ASSETS_JSON="$(printf '%s' "$REL_JSON" | python3 -c 'import sys,json;print(json.dumps({a["name"]:a["url"] for a in json.load(sys.stdin)["assets"]}))')"
+have_sha() { /usr/bin/python3 -c 'import json,sys,os
+p=sys.argv[1]
+print(json.load(open(p)).get("components",{}).get(sys.argv[2],"") if os.path.exists(p) else "")' "$ROOT/manifest.json" "$1" 2>/dev/null || true; }
+
 MAN_TMP="$ROOT/staging/manifest.new.json"
-printf '{"version":"%s","platform":"%s","components":{' "${TAG#v}" "$PLAT" > "$MAN_TMP"
+printf '{"version":"%s","platform":"%s","components":{' "$VERSION" "$PLAT" > "$MAN_TMP"
 first=1
-while read -r NAME ASSET SHA SIZE TARGET; do
-  URL="$(printf '%s' "$ASSETS_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$ASSET',''))")"
-  [ -n "$URL" ] || die "у релізі немає файлу $ASSET"
-  HAVE="$(python3 -c "import json,sys;m=json.load(open(sys.argv[1])) if __import__('os').path.exists(sys.argv[1]) else {};print(m.get('components',{}).get('$NAME',''))" "$ROOT/manifest.json" 2>/dev/null || true)"
-  if [ "$HAVE" = "$SHA" ]; then ok "$NAME — уже стоїть"; else
+while read -r NAME ASSET SHA SIZE TARGET ENC; do
+  [ "$TARGET" = "-" ] && TARGET=""
+  if [ "$(have_sha "$NAME")" = "$SHA" ]; then ok "$NAME — уже стоїть"; else
     step "$NAME · $(( SIZE / 1048576 )) МБ"
-    ZIP="$ROOT/staging/$ASSET"
-    gh_asset "$URL" "$ZIP"
-    GOT="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
-    [ "$GOT" = "$SHA" ] || { rm -f "$ZIP"; die "$NAME: хеш не зійшовся — спробуй ще раз"; }
+    F="$ROOT/staging/$ASSET"
+    dl "https://github.com/$REPO/releases/download/v$VERSION/$ASSET" "$F" || die "$NAME: не скачалось"
+    GOT="$(shasum -a 256 "$F" | cut -d' ' -f1)"
+    [ "$GOT" = "$SHA" ] || { rm -f "$F"; die "$NAME: файл пошкоджено при завантаженні"; }
+    ZIP="$F"
+    if [ "$ENC" = "1" ]; then
+      ZIP="${F%.enc}"
+      IV="$(head -c 16 "$F" | xxd -p | tr -d '\n')"
+      tail -c +17 "$F" | openssl enc -d -aes-256-cbc -K "$KEY" -iv "$IV" -out "$ZIP" 2>/dev/null \
+        || { rm -f "$ZIP"; die "$NAME: не розшифрувалось — ключ у рядку установки неповний"; }
+    fi
     UNP="$ROOT/staging/$NAME"; rm -rf "$UNP"; mkdir -p "$UNP"
-    ditto -x -k "$ZIP" "$UNP"
+    ditto -x -k "$ZIP" "$UNP" || die "$NAME: не розпакувалось"
     if [ "$NAME" = "cep" ]; then DEST="$CEP"; else DEST="$ROOT/${TARGET}"; fi
     mkdir -p "$DEST"
     ditto "$UNP" "$DEST"
-    rm -rf "$UNP" "$ZIP"
+    rm -rf "$UNP" "$ZIP" "$F"
     ok "$NAME"
   fi
   [ $first -eq 1 ] || printf ',' >> "$MAN_TMP"; first=0
@@ -100,25 +115,26 @@ printf '},"installed":"%s"}\n' "$(date +%F)" >> "$MAN_TMP"
 mv "$MAN_TMP" "$ROOT/manifest.json"
 
 step "налаштування"
-chmod +x "$ROOT/python/bin/python3" "$ROOT/ffmpeg" "$ROOT/ffprobe" 2>/dev/null || true
+chmod +x "$ROOT/python/bin/"* "$ROOT/ffmpeg" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$ROOT" "$CEP" 2>/dev/null || true
 ESC_ROOT="$(printf '%s' "$ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-printf '{"panelJsx": "%s/Ruut Script 2.0.jsx", "toolsDir": "%s", "root": "%s", "repo": "%s", "token": "%s", "version": "%s"}\n' \
-  "$ESC_ROOT" "$ESC_ROOT" "$ESC_ROOT" "$REPO" "$TOKEN" "${TAG#v}" > "$CEP/config.json"
+printf '{"panelJsx": "%s/Ruut Script 2.0.jsx", "toolsDir": "%s", "root": "%s", "repo": "%s", "key": "%s", "version": "%s"}\n' \
+  "$ESC_ROOT" "$ESC_ROOT" "$ESC_ROOT" "$REPO" "$KEY" "$VERSION" > "$CEP/config.json"
 if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" ]; then cp "$ROOT/Minor-Bold.ttf" "$HOME/Library/Fonts/"; ok "шрифт Minor-Bold"; fi
-# стара панель 2.0 у папці користувача → редирект
 OLD="$HOME/Library/Application Support/Ruut Script/panel/Ruut Script 2.0.jsx"
 if [ -f "$OLD" ]; then mv "$OLD" "$OLD.before-3.0.bak"; printf '(function(){ alert("Панель переїхала: Window → Extensions → Ruut Script"); })();' > "$OLD"; fi
-ok "конфіг записано"
+ok "готово до перевірки"
 
 step "самоперевірка на тестовому звуці"
-if ( cd "$ROOT" && PYTHONIOENCODING=utf-8 "$ROOT/python/bin/python3" -X utf8 selftest.py ); then
+if ( cd "$ROOT" && PYTHONIOENCODING=utf-8 "$ROOT/python/bin/python3" -X utf8 selftest.py ) > "$ROOT/logs/install-selftest.log" 2>&1; then
+  ok "розпізнавання працює"
   say ""
   say "Готово. Відкрий After Effects → Window → Extensions → Ruut Script."
   say "Перетягни панель, куди зручно, і збережи Workspace."
 else
+  cat "$ROOT/logs/install-selftest.log"
   say ""
   say "Установка завершена, але самоперевірка знайшла проблему (див. вище)."
-  say "Скопіюй цей вивід і надішли Мирону."
+  say "Скопіюй увесь текст у цьому вікні й надішли Мирону."
   exit 2
 fi

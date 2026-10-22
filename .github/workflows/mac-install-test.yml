@@ -1,0 +1,41 @@
+# Перевірка установки на справжніх маках (Apple Silicon і Intel) — тим самим
+# рядком, що отримують колеги. Ключ — секрет репо RUUT_KEY.
+# Запуск вручну після кожного релізу.
+name: mac-install-test
+on:
+  workflow_dispatch:
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Установка одним рядком (як у колег)
+        env:
+          RUUT_KEY: ${{ secrets.RUUT_KEY }}
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/tools/release/install.sh)"
+      - name: Що встановилось
+        run: |
+          ROOT="$HOME/Library/Application Support/Ruut Script"
+          CEP="$HOME/Library/Application Support/Adobe/CEP/extensions/com.ruut.panel"
+          ls -la "$ROOT" | head -40
+          cat "$ROOT/manifest.json"
+          ls "$CEP"; test -f "$CEP/CSXS/manifest.xml"; test -f "$CEP/META-INF/signatures.xml"
+          sed 's/"key": "[^"]*"/"key": "***"/' "$CEP/config.json"
+      - name: Повторний запуск = оновлення (має нічого не качати)
+        env:
+          RUUT_KEY: ${{ secrets.RUUT_KEY }}
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/tools/release/install.sh)" | tee second.log
+          if grep -q "МБ" second.log; then echo "повторний запуск щось качав"; exit 1; fi
+      - name: Субтитри на французькому тесті (наскрізно)
+        run: |
+          ROOT="$HOME/Library/Application Support/Ruut Script"
+          cd "$ROOT"
+          curl -fsSL -o fr.wav https://github.com/${{ github.repository }}/releases/download/test-fixtures/fr_tts.wav
+          curl -fsSL -o fr.txt https://github.com/${{ github.repository }}/releases/download/test-fixtures/fr_tts.txt
+          PYTHONIOENCODING=utf-8 ./python/bin/python3 -X utf8 subs_reel.py --audio fr.wav --out fr.json --caps-display --script fr.txt | tee subs.log
+          grep -q "текст як джерело: слів 51, з них почуто 51" subs.log
