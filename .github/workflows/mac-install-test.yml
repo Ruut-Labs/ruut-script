@@ -24,7 +24,8 @@ jobs:
           ls -la "$ROOT" | head -40
           cat "$ROOT/manifest.json"
           ls "$CEP"; test -f "$CEP/CSXS/manifest.xml"; test -f "$CEP/META-INF/signatures.xml"
-          sed 's/"key": "[^"]*"/"key": "***"/' "$CEP/config.json"
+          sed 's/"key": "[^"]*"/"key": "***"/' "$ROOT/config.json"
+          test ! -f "$CEP/config.json"
       - name: Повторний запуск = оновлення (має нічого не качати)
         env:
           RUUT_KEY: ${{ secrets.RUUT_KEY }}

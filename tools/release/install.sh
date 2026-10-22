@@ -102,7 +102,7 @@ while read -r NAME ASSET SHA SIZE TARGET ENC TAG; do
     fi
     UNP="$ROOT/staging/$NAME"; rm -rf "$UNP"; mkdir -p "$UNP"
     ditto -x -k "$ZIP" "$UNP" || die "$NAME: не розпакувалось"
-    if [ "$NAME" = "cep" ]; then DEST="$CEP"; else DEST="$ROOT/${TARGET}"; fi
+    if [ "$NAME" = "cep" ]; then DEST="$CEP"; rm -rf "$CEP"; else DEST="$ROOT/${TARGET}"; fi
     # архів міг прийти з зайвою верхньою папкою (python/python/…) — знімаємо її
     if [ -n "$TARGET" ] && [ -d "$UNP/$TARGET" ] && [ "$(ls -A "$UNP" | wc -l | tr -d ' ')" = "1" ]; then UNP="$UNP/$TARGET"; fi
     mkdir -p "$DEST"
@@ -121,7 +121,9 @@ chmod +x "$ROOT/python/bin/"* "$ROOT/ffmpeg" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$ROOT" "$CEP" 2>/dev/null || true
 ESC_ROOT="$(printf '%s' "$ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 printf '{"panelJsx": "%s/Ruut Script 2.0.jsx", "toolsDir": "%s", "root": "%s", "repo": "%s", "key": "%s", "version": "%s"}\n' \
-  "$ESC_ROOT" "$ESC_ROOT" "$ESC_ROOT" "$REPO" "$KEY" "$VERSION" > "$CEP/config.json"
+  "$ESC_ROOT" "$ESC_ROOT" "$ESC_ROOT" "$REPO" "$KEY" "$VERSION" > "$ROOT/config.json"
+# у папці панелі config.json лежати не може — будь-який доданий файл ламає її підпис
+rm -f "$CEP/config.json"
 # шрифт: папки ~/Library/Fonts на «чистому» маку може не бути; помилка тут
 # не має зривати установку — без шрифту працює все, крім його вигляду
 if [ -f "$ROOT/Minor-Bold.ttf" ] && [ ! -f "$HOME/Library/Fonts/Minor-Bold.ttf" ]; then
